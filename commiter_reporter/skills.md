@@ -1,291 +1,348 @@
-# 📄 `skills.md`（工程阶段管理）
+# Git Stage Manager Skill
 
-````markdown
----
-name: engineering_stage_commit
-description: |
-  Manage stage-based commits for engineering projects.
-  Ensure strict stage isolation, controlled file scope, and structured step reports.
----
+## Purpose
 
-# Engineering Stage Commit Skill
+Use this skill to manage a single stage of an engineering project with Git-based isolation, traceability, and safe commit behavior.
 
-## 🎯 Purpose
+This skill helps an AI coding agent complete one bounded engineering stage, generate a stage summary, and create exactly one Git commit without accidentally including unrelated user changes.
 
-Enforce structured stage-based workflow:
+## When to Use
 
-- Each stage = one isolated commit
-- Generate a step report file
-- Avoid cross-stage pollution
-- Never commit unrelated changes
-- Never push unless explicitly required
+Use this skill when the user asks the agent to do any of the following:
 
----
+- Complete a clearly bounded engineering stage
+- Implement a feature as a staged commit
+- Refactor part of a project and commit the result
+- Make a structural or architectural change that should be traceable
+- Produce a summary file for the completed stage
+- Safely commit only the files modified during the current stage
 
-# 🧠 Core Rules (STRICT)
+## Do Not Use
 
-## 1. Commit Rules
+Do not use this skill when:
 
-Allowed:
-- git commit
+- The user asks for casual advice, explanation, or code review only
+- The task is a small one-off edit that does not require a commit
+- The user explicitly says not to commit
+- The repository is not under Git control
+- The user asks to push changes remotely
+- The task requires handling multiple independent stages at once
 
-Forbidden:
-- git push (unless user explicitly requests)
-- git add .
-- git add -A
-- git commit -a
+## Core Principle
 
----
+Git is the source of truth. The agent records intent.
 
-## 2. File Scope Control (CRITICAL)
+```text
+Intent Layer  = FILE_SET + ACTION_LOG
+Source Truth  = Git repository state
+```
 
-You MUST explicitly maintain stage file sets during execution:
+The agent must never rely only on memory. Git status and diff must be used at key checkpoints to validate the repository state.
+
+## Stage Context
+
+At the beginning of every stage, initialize the following context:
+
+```text
+STAGE_ID      = UUID or short unique identifier
+BASE_COMMIT   = output of `git rev-parse HEAD`
+STAGE_TYPE    = feature | fix | refactor | chore
+FILE_SET      = files explicitly owned by this stage
+ACTION_LOG    = operation records for this stage
+```
+
+`FILE_SET` is divided into:
 
 ```text
 STEP_NEW_FILES
 STEP_MODIFIED_FILES
 STEP_DELETED_FILES
-````
-
-Rules:
-
-* Only files you created/modified in THIS stage can be included
-* DO NOT infer file list from git status or full diff
-* DO NOT scan entire workspace to decide scope
-
----
-
-## 3. User Changes Protection (CRITICAL)
-
-At stage start, there may be existing uncommitted changes:
-
-| Case                     | Action                 |
-| ------------------------ | ---------------------- |
-| Related to current stage | Include in this stage  |
-| Unrelated                | Ignore (DO NOT commit) |
-| Uncertain                | Ignore by default      |
-
-NEVER commit user changes blindly.
-
----
-
-## 4. Diff Isolation (CRITICAL)
-
-All diffs must represent ONLY this stage.
-
-Use:
-
-```bash
-git diff BASE_COMMIT -- <file>
 ```
 
-DO NOT:
+## File Set Rules
 
-* use full `git diff`
-* include previous stage changes
+### Weak Lock Rule
 
----
+`FILE_SET` is locked by default but can be explicitly expanded.
 
-## 5. Stage Isolation
+Allowed:
 
-* Each stage MUST end with one commit
-* One commit = one stage
-* NEVER mix multiple stages in one commit
+```text
+ADD_TO_FILE_SET(file, action, reason)
+```
 
----
+A file may be added to `FILE_SET` only when:
 
-## 6. Non-stage Work
+1. The current stage directly creates, modifies, or deletes it; or
+2. The user explicitly asks the agent to include it.
 
-* Normal small edits DO NOT trigger commit
-* They may be:
+Disallowed:
 
-  * absorbed into next stage (if relevant)
-  * ignored (if unrelated)
+- Implicitly adding files discovered from `git status`
+- Automatically adding all changed files
+- Adding unrelated user changes
+- Using semantic guessing alone to decide that an existing change is related
 
----
+## Action Log
 
-# 🔄 State Machine
+For every file operation, record an action log entry:
 
-## States
+```text
+{
+  file: "path/to/file",
+  action: "create | modify | delete",
+  reason: "why this file belongs to the current stage"
+}
+```
+
+The action log is used to generate the summary and validate the commit scope.
+
+## Git Command Rules
+
+Allowed:
+
+```bash
+git status
+git diff
+git diff BASE_COMMIT -- <file>
+git rev-parse HEAD
+git add <explicit-file>
+git commit -m "<message>"
+```
+
+Forbidden unless the user explicitly requests otherwise:
+
+```bash
+git add .
+git add -A
+git commit -a
+git push
+git reset --hard
+git clean -fd
+```
+
+## State Machine
 
 ```text
 IDLE
-PRE_STAGE_CHECK
-STAGE_ACTIVE
-STAGE_SUMMARY
-STAGE_COMMIT
-COMPLETED
+  -> PRE_STAGE_CHECK
+  -> STAGE_INIT
+  -> STAGE_ACTIVE
+  -> STAGE_VALIDATE
+  -> STAGE_SUMMARY
+  -> STAGE_COMMIT
+  -> COMPLETED
+
+Any state
+  -> ERROR
+  -> RECOVERY
 ```
 
----
+## Execution Procedure
 
-## Transitions
+### 1. PRE_STAGE_CHECK
 
-```text
-IDLE → PRE_STAGE_CHECK → STAGE_ACTIVE → STAGE_SUMMARY → STAGE_COMMIT → COMPLETED
-```
-
----
-
-# ⚙️ Execution Steps
-
-## Step 0: Start Stage
-
-Record base commit:
+Run:
 
 ```bash
-BASE_COMMIT=$(git rev-parse HEAD)
+git status
+```
+
+Behavior:
+
+- Detect existing uncommitted changes.
+- Do not automatically include existing changes.
+- Existing changes remain outside `FILE_SET` unless the current stage directly modifies them or the user explicitly asks to include them.
+- If existing changes conflict with the stage, ask the user before proceeding.
+
+### 2. STAGE_INIT
+
+Run:
+
+```bash
+git rev-parse HEAD
 ```
 
 Initialize:
 
 ```text
-STEP_NEW_FILES = []
-STEP_MODIFIED_FILES = []
-STEP_DELETED_FILES = []
+STAGE_ID
+BASE_COMMIT
+STAGE_TYPE
+FILE_SET = empty
+ACTION_LOG = []
 ```
 
----
+### 3. STAGE_ACTIVE
 
-## Step 1: PRE_STAGE_CHECK
+Perform the requested engineering work.
 
-Check existing changes:
+For each file operation:
 
-* Decide per file:
+1. Add the file to the correct `FILE_SET` bucket.
+2. Add an `ACTION_LOG` entry.
+3. Keep the stage focused on the requested scope.
 
-  * include (if relevant)
-  * ignore (if unrelated)
-
-DO NOT commit them automatically.
-
----
-
-## Step 2: STAGE_ACTIVE
-
-During work:
-
-* When creating files → add to STEP_NEW_FILES
-* When modifying files → add to STEP_MODIFIED_FILES
-* When deleting files → add to STEP_DELETED_FILES
-
-This tracking is MANDATORY.
-
----
-
-## Step 3: STAGE_SUMMARY
-
-Generate report file:
-
-### Filename
+Example:
 
 ```text
-stepX_Y_<description>.txt
+ADD_TO_FILE_SET("src/parser.ts", "modify", "update parser to support the new stage summary format")
 ```
 
----
+### 4. STAGE_VALIDATE
 
-## Report Content
-
-### 1. Stage Description
-
-Explain:
-
-* purpose
-* main changes
-* relation to previous work
-
----
-
-### 2. New Files
+Run:
 
 ```bash
-echo "## New Files" >> FILE
+git status
+git diff
 ```
 
----
+Validate all of the following:
 
-### 3. Full Content of New Files
+```text
+1. Every source file changed by this stage is in FILE_SET.
+2. Every source file in FILE_SET has a matching reason in ACTION_LOG.
+3. No unrelated source file is staged or prepared for commit.
+4. Untracked source files are either in FILE_SET or explicitly ignored.
+5. Generated/cache/build artifacts are ignored unless explicitly part of the stage.
+```
+
+If validation fails, enter `ERROR`.
+
+### 5. STAGE_SUMMARY
+
+Create a summary file named:
+
+```text
+step_<stage_id>_<short_description>.md
+```
+
+The summary must contain:
+
+```text
+1. Stage description
+2. STAGE_ID
+3. STAGE_TYPE
+4. BASE_COMMIT
+5. FILE_SET
+6. ACTION_LOG summary
+7. Key diff summary
+8. Risks or notes
+```
+
+The summary should be concise. Do not paste full file contents unless the user explicitly asks.
+
+For changed files, inspect diffs with:
 
 ```bash
-for f in ${STEP_NEW_FILES[@]}; do
-  cat "$f" >> FILE
-done
+git diff BASE_COMMIT -- <file>
 ```
 
-DO NOT manually write code.
+### 6. STAGE_COMMIT
 
----
-
-### 4. Modified Files
+Stage only explicit files:
 
 ```bash
-echo "## Modified Files" >> FILE
+git add <FILE_SET files>
+git add <summary file>
 ```
 
----
-
-### 5. Diff of Modified Files
+Then commit:
 
 ```bash
-for f in ${STEP_MODIFIED_FILES[@]}; do
-  git diff "$BASE_COMMIT" -- "$f" >> FILE
-done
+git commit -m "[<STAGE_ID>][<STAGE_TYPE>] <short description>"
 ```
 
----
-
-## Step 4: STAGE_COMMIT
-
-Only add stage files:
+Never run:
 
 ```bash
-git add <STEP_NEW_FILES>
-git add <STEP_MODIFIED_FILES>
-git add <STEP_DELETED_FILES>
-git add <REPORT_FILE>
+git add .
+git add -A
+git commit -a
 ```
 
-Commit:
+### 7. COMPLETED
 
-```bash
-git commit -m "stepX_Y_<description>"
+After a successful commit, report:
+
+```text
+1. Summary file path
+2. Commit hash
+3. Brief stage summary
 ```
 
----
+Do not push.
 
-## Step 5: Output
+## Error Handling
 
-Return:
+Enter `ERROR` when:
 
-* Report file path
-* Short summary of the stage
+- `FILE_SET` does not match Git changes
+- Git command fails
+- There are untracked source files not accounted for
+- There are unrelated staged files
+- The working tree contains conflicting user changes
 
----
+Recovery options:
 
-# 🚫 Forbidden Actions
+```text
+1. Update FILE_SET explicitly, with reasons
+2. Ask the user how to handle conflicting changes
+3. Abort the stage without committing
+4. Leave the repository unchanged when safe recovery is not possible
+```
 
-* git add .
-* git add -A
-* git commit -a
-* git push
-* committing unrelated files
-* generating diff from full workspace
-* skipping stage commit
-* mixing multiple stages
+Do not use destructive recovery commands such as `git reset --hard` or `git clean -fd` unless the user explicitly instructs it.
 
----
+## Output Format
 
-# ✅ Self Checklist (MUST PASS)
+When the stage completes, respond with:
 
-Before commit, verify:
+```text
+Completed stage: <short description>
+Summary file: <path>
+Commit: <hash>
+Notes: <short notes, if any>
+```
 
-* [ ] File list is explicitly tracked (NOT inferred)
-* [ ] No unrelated files included
-* [ ] Diff only includes stage changes
-* [ ] New file content is from actual files (not handwritten)
-* [ ] No use of git add .
-* [ ] Exactly one commit for this stage
-* [ ] Report file generated
-* [ ] No git push executed
+If the stage cannot be completed, respond with:
 
-````
+```text
+Stage not committed.
+Reason: <specific reason>
+Required action: <what needs to happen next>
+```
+
+## Minimal Example
+
+User request:
+
+```text
+Implement the new parser config format as one stage and commit it.
+```
+
+Expected behavior:
+
+```text
+1. Run git status.
+2. Initialize STAGE_ID and BASE_COMMIT.
+3. Modify only required parser/config files.
+4. Record each file in FILE_SET and ACTION_LOG.
+5. Validate with git status and git diff.
+6. Generate step_<stage_id>_parser_config.md.
+7. git add only FILE_SET files and the summary file.
+8. git commit once.
+9. Report summary path and commit hash.
+```
+
+## Agent Reminder
+
+```text
+Commit is the stage boundary.
+FILE_SET is explicit intent.
+Git is the source of truth.
+Never commit unrelated user changes.
+Never use git add .
+Never push unless explicitly requested.
+```
