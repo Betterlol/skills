@@ -1,174 +1,175 @@
-# 📄 工程系统性项目阶段管理协议（Draft v1.0）
-
-## 一、概念定义
-
-### 1. 项目类型
-
-* **工程系统性项目**
-
-  * 多阶段推进
-  * 涉及结构性变更 / 架构调整 / 功能模块建设
-  * 需要清晰的版本边界和可回溯能力
-
-* **日常工作或普通项目**
-
-  * 零散修改
-  * 修复、微调、临时性工作
-  * 不强制阶段管理
+# 📄 工程系统性项目阶段管理协议（v2.0 - Executable）
 
 ---
 
-### 2. 工作类型
+## 一、设计目标（升级版）
 
-* **阶段性工作**
+在 v1 的基础上，v2 目标从“规范行为”升级为“可执行系统”：
 
-  * 体现为“大改动”或“大方向调整”
-  * 具有明确阶段目标和完成标志
-  * 必须形成独立 commit
-
-* **非阶段性工作**
-
-  * 修复类、调试类、日常小修改
-  * 不单独形成阶段
-  * 默认不 commit（除非用户要求）
+1. **阶段隔离（Stage Isolation）**
+2. **变更可追溯（Traceability）**
+3. **Agent 可控（Deterministic Behavior）**
+4. **与 Git 协同（Git as Source of Truth）**
+5. **容错与恢复能力（Fault Tolerance）**
 
 ---
 
-## 二、协议目标
+## 二、核心设计变更（相对于 v1）
 
-本协议用于规范 Agent 在工程系统性项目中的行为，核心目标：
+### 1. 双轨制（关键）
 
-1. **阶段隔离**：每个阶段对应一个独立 commit
-2. **变更可追溯**：每个阶段生成完整总结文件
-3. **避免污染**：
-
-   * 防止跨阶段 diff 混入
-   * 防止误提交用户无关改动
-4. **最小提交原则**：仅提交本阶段相关文件
-5. **不自动 push**
-
----
-
-## 三、核心原则
-
-### 1. 通用原则
-
-* 仅允许执行：
-
-```bash
-git commit
+```text
+Agent记录 = 意图（Intent Layer）
+Git状态 = 真相（Source of Truth）
 ```
 
-* 禁止执行：
+规则：
+
+* Agent **必须维护文件集合（意图）**
+* Git **用于校验和对齐真实状态**
+
+允许：
 
 ```bash
-git push
+git status   # 用于校验
+git diff     # 用于验证差异
 ```
 
-除非用户明确要求。
-
----
-
-### 2. 文件边界控制原则（关键）
-
-阶段性工作中的文件范围必须由 Agent **显式维护**：
-
-* 新增文件
-* 修改文件
-* 删除文件（如有）
-
-**禁止：**
-
-* 使用 `git status` 扫描并自动决定提交范围
-* 使用 `git diff` 推断全部改动
-
-👉 所有阶段文件必须来自“任务执行过程中的记录”。
-
----
-
-### 3. 提交范围控制原则（关键）
-
-阶段性 commit 时：
-
-只允许提交：
-
-* 本阶段新增文件
-* 本阶段修改文件
-* 本阶段删除文件
-* 阶段总结文件
-
-**禁止：**
+禁止：
 
 ```bash
 git add .
-git add -A
 git commit -a
 ```
 
 ---
 
-### 4. diff 隔离原则（关键）
+### 2. 阶段上下文（Stage Context）
 
-改动文件的差异必须：
+每个阶段必须绑定唯一上下文：
 
-* **仅包含本阶段引入的修改**
-* 不包含：
+```text
+STAGE_ID       = UUID
+BASE_COMMIT    = 当前阶段开始时的 commit hash
+```
 
-  * 上一阶段改动
-  * 无关改动
+所有操作必须绑定：
 
-推荐方式：
-
-```bash
-git diff BASE_COMMIT -- <file>
+```text
+(stage_id, base_commit, file_set)
 ```
 
 ---
 
-### 5. 用户改动保护原则（关键）
+### 3. 文件集合定义（仍保留，但增强）
 
-阶段开始前可能存在未提交改动：
+```text
+STEP_NEW_FILES
+STEP_MODIFIED_FILES
+STEP_DELETED_FILES
+```
 
-| 情况     | 处理     |
-| ------ | ------ |
-| 与本阶段相关 | 纳入本阶段  |
-| 与本阶段无关 | 保留，不提交 |
-| 无法判断   | 默认不提交  |
+新增约束：
 
-👉 **严禁自动提交用户未确认的改动**
+* 每次文件操作后：
 
----
-
-### 6. 阶段隔离原则
-
-* 每个阶段结束必须执行 commit
-* 每个 commit 对应一个阶段
-* 不允许跨阶段合并 commit
+  * 必须更新集合
+  * 必须通过 git 校验一致性
 
 ---
 
-### 7. 非阶段性工作原则
+### 4. 未提交改动处理（改为显式决策）
 
-* 正常执行，不强制 commit
-* 保持灵活性
-* 在后续阶段中：
+阶段开始时：
 
-  * 可被吸收（若相关）
-  * 或被忽略（若无关）
+```text
+检测到未提交改动：
+
+1. 纳入本阶段
+2. 暂存（stash）
+3. 忽略
+
+需要用户选择
+```
+
+默认行为：
+
+👉 不自动纳入
 
 ---
 
-## 四、阶段执行流程（状态机模型）
+## 三、核心原则（更新版）
+
+### 1. Git 协同原则
+
+* Git 是唯一真实状态来源
+* Agent 不得假设 repo 状态
+* 所有提交前必须校验：
+
+```bash
+git status
+git diff
+```
+
+---
+
+### 2. 提交最小化原则
+
+只允许提交：
+
+* 本阶段文件集合
+* 阶段 summary 文件
+
+---
+
+### 3. 双重校验原则（新增）
+
+在 commit 前执行：
+
+```text
+Agent记录文件集合
+vs
+git status 实际变更
+```
+
+若不一致：
+
+👉 必须修正后才能 commit
+
+---
+
+### 4. 用户改动保护原则（强化）
+
+* 未确认改动：
+
+  * 默认不提交
+* 必须显式确认才允许纳入
+
+---
+
+### 5. 阶段强隔离原则
+
+* 一个阶段 = 一个 commit
+* 不允许跨阶段合并
+
+---
+
+## 四、阶段状态机（v2）
 
 ### 状态定义
 
 ```text
-IDLE                非阶段工作
-PRE_STAGE_CHECK     阶段开始前检查
-STAGE_ACTIVE        阶段执行中
-STAGE_SUMMARY       生成总结文件
-STAGE_COMMIT        提交阶段
-COMPLETED           阶段完成
+IDLE
+PRE_STAGE_CHECK
+STAGE_INIT          新增
+STAGE_ACTIVE
+STAGE_VALIDATE      新增（关键）
+STAGE_SUMMARY
+STAGE_COMMIT
+COMPLETED
+
+ERROR               新增
+RECOVERY            新增
 ```
 
 ---
@@ -177,124 +178,128 @@ COMPLETED           阶段完成
 
 ```text
 IDLE
-  ↓（开始阶段性任务）
+  ↓
 PRE_STAGE_CHECK
-
-PRE_STAGE_CHECK
-  ↓（判断已有改动）
+  ↓
+STAGE_INIT
+  ↓
 STAGE_ACTIVE
-
-STAGE_ACTIVE
-  ↓（阶段完成）
-STAGE_SUMMARY
-
+  ↓
+STAGE_VALIDATE
+  ↓
 STAGE_SUMMARY
   ↓
-STAGE_COMMIT
-
 STAGE_COMMIT
   ↓
 COMPLETED
+
+异常路径：
+任意阶段 → ERROR → RECOVERY
 ```
 
 ---
 
-### 行为定义
+## 五、阶段执行细节
 
-#### IDLE
+### 1. PRE_STAGE_CHECK
 
-* 执行非阶段性工作
-* 不 commit
-
----
-
-#### PRE_STAGE_CHECK
-
-* 检查已有未提交改动
-* 判断是否纳入本阶段：
-
-  * 相关 → 纳入
-  * 无关 → 忽略
-  * 不确定 → 忽略
-
----
-
-#### STAGE_ACTIVE
-
-Agent 必须维护：
-
-```text
-STEP_NEW_FILES
-STEP_MODIFIED_FILES
-STEP_DELETED_FILES
-```
-
-所有变更必须记录到集合中。
-
----
-
-#### STAGE_SUMMARY
-
-生成总结文件：
-
-### 文件命名
-
-```text
-stepX_Y_具体描述.txt
-```
-
-说明：
-
-* X：阶段序号
-* Y：子阶段序号（可选）
-
----
-
-### 文件内容结构
-
-```text
-1. 阶段性工作描述
-2. 新增文件
-3. 新增文件完整内容
-4. 改动文件
-5. 改动文件差异
-```
-
----
-
-### 内容要求
-
-#### 新增文件内容
-
-必须通过工具获取，例如：
+执行：
 
 ```bash
-cat file.py
+git status
 ```
 
-禁止手写。
+行为：
+
+* 检测未提交改动
+* 触发用户决策（纳入 / stash / 忽略）
 
 ---
 
-#### 改动文件差异
+### 2. STAGE_INIT（新增）
 
-必须使用：
+初始化：
 
-```bash
-git diff BASE_COMMIT -- file
+```text
+STAGE_ID
+BASE_COMMIT = git rev-parse HEAD
+FILE_SET = 空集合
 ```
-
-禁止输出全量 diff。
 
 ---
 
-#### STAGE_COMMIT
+### 3. STAGE_ACTIVE
 
-仅提交本阶段文件：
+Agent 执行任务，并维护：
+
+```text
+NEW / MODIFIED / DELETED
+```
+
+每次文件操作后必须：
 
 ```bash
-git add <files>
-git commit -m "stepX_Y_描述"
+git status
+```
+
+用于校验一致性
+
+---
+
+### 4. STAGE_VALIDATE（关键新增）
+
+执行：
+
+```bash
+git status
+git diff
+```
+
+校验：
+
+```text
+Agent记录文件集合
+vs
+Git实际变更
+```
+
+要求：
+
+* 必须完全一致
+* 否则进入 ERROR
+
+---
+
+### 5. STAGE_SUMMARY（优化版）
+
+生成文件：
+
+```text
+stepX_Y_description.md
+```
+
+内容结构：
+
+```text
+1. 阶段描述
+2. BASE_COMMIT
+3. 变更文件列表
+4. 关键差异摘要（非完整 diff）
+5. 风险或注意事项
+```
+
+👉 不再要求完整文件内容（避免冗余）
+
+---
+
+### 6. STAGE_COMMIT
+
+执行：
+
+```bash
+git add <file_set>
+git add summary.md
+git commit -m "[STAGE_ID] stepX_Y: 描述"
 ```
 
 禁止：
@@ -305,34 +310,64 @@ git add .
 
 ---
 
-#### COMPLETED
+### 7. ERROR（新增）
 
-* 阶段结束
-* 等待下一阶段或进入日常工作
+触发条件：
+
+* 文件集合不一致
+* git 操作失败
+* 状态异常
 
 ---
 
-## 五、输出要求
+### 8. RECOVERY（新增）
 
-阶段完成后必须输出：
-
-1. 总结文件路径：
+策略：
 
 ```text
-stepX_Y_描述.txt
+1. 重新同步 file_set
+2. 或回滚至 BASE_COMMIT
+3. 或请求用户介入
 ```
 
-2. 工作总结概要（简要说明本阶段内容）
+---
+
+## 六、输出要求（更新）
+
+阶段完成后输出：
+
+```text
+1. summary 文件路径
+2. commit hash
+3. 简要说明
+```
 
 ---
 
-## 六、设计核心总结（给 Agent）
+## 七、设计核心总结（v2）
 
 ```text
-1. commit 是阶段边界
-2. 文件集合由 agent 管理，不由 git 推断
-3. diff 必须是阶段内 diff
-4. 不得提交无关用户改动
-5. 不得使用全量 add/commit
-6. 每个阶段必须独立 commit
+1. Git 是唯一真实状态
+2. Agent 负责意图表达
+3. commit = 阶段边界
+4. 必须双向校验（Agent vs Git）
+5. 不得自动处理用户改动
+6. 每阶段必须可恢复
+```
+
+---
+
+## 八、设计定位（重要）
+
+本协议不再只是“行为规范”，而是：
+
+👉 Agent 的“版本控制中间层（Agent VCS Layer）”
+
+适用于：
+
+* AI coding agent
+* 多 agent 协作系统
+* 自动化工程系统
+
+```
 ```
