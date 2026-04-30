@@ -1,12 +1,12 @@
-# 📄 工程系统性项目阶段管理协议（v3.0 - Practical & Agent-Friendly）
+# 📄 工程系统性项目阶段管理协议（v3.1 - Executable & Robust）
 
 ---
 
-## 一、设计定位（最终版）
+## 一、设计定位
 
 本协议是：
 
-> 👉 **Agent-Oriented Version Control Protocol（面向 Agent 的版本控制协议）**
+> 👉 **Agent-Oriented Version Control Protocol（Agent 运行控制层）**
 
 用于：
 
@@ -18,12 +18,12 @@
 
 ## 二、设计目标
 
-1. **阶段隔离（Stage Isolation）**
-2. **变更可追溯（Traceability）**
-3. **可执行性（Agent-friendly）**
-4. **与 Git 协同（Git as Source of Truth）**
-5. **容错与恢复能力（Fault Tolerance）**
-6. **低运行成本（Practical Execution）**
+1. 阶段隔离（Stage Isolation）
+2. 变更可追溯（Traceability）
+3. 可执行性（Agent-friendly）
+4. 与 Git 协同（Git as Source of Truth）
+5. 容错与恢复能力（Fault Tolerance）
+6. 稳定性优先（Deterministic > Smart）
 
 ---
 
@@ -32,30 +32,25 @@
 ### 1. 双轨制（核心）
 
 ```text
-Agent记录（Intent Layer） = 文件集合（file_set）
-Git状态（Source of Truth） = 实际仓库状态
+Agent记录（Intent Layer） = FILE_SET + ACTION_LOG
+Git状态（Source of Truth） = 仓库真实状态
 ```
-
-规则：
-
-* Agent 决定“哪些文件属于本阶段”
-* Git 用于校验与提交
 
 ---
 
 ### 2. 阶段上下文（Stage Context）
 
-每个阶段必须绑定：
-
 ```text
 STAGE_ID      = UUID
-BASE_COMMIT   = 阶段开始时的 commit
+BASE_COMMIT   = 阶段开始时 commit
 FILE_SET      = 本阶段文件集合
+ACTION_LOG    = 操作日志
+STAGE_TYPE    = feature | fix | refactor | chore
 ```
 
 ---
 
-### 3. 文件集合（File Set）
+### 3. 文件集合（FILE_SET）
 
 ```text
 STEP_NEW_FILES
@@ -65,80 +60,120 @@ STEP_DELETED_FILES
 
 ---
 
-### 4. 文件集合锁（新增）
+### 4. FILE_SET 机制（弱锁）
 
-一旦文件进入 FILE_SET：
+规则：
 
-* 不得隐式移除
-* 不得自动扩展
-* 所有提交必须来自该集合
+* 默认锁定（不可隐式变更）
+* 允许**显式扩展**（必须记录）
 
-👉 防止阶段污染
+```text
+ADD_TO_FILE_SET(file, reason)
+```
+
+必须满足：
+
+* 当前阶段直接操作
+  或
+* 明确依赖关系（如重构传播）
 
 ---
 
-## 四、核心原则（v3 精简版）
+### 5. ACTION_LOG（新增）
+
+```text
+ACTION_LOG = [
+  {
+    file: "a.py",
+    action: "modify",
+    reason: "fix bug in parser"
+  }
+]
+```
+
+作用：
+
+* 可解释性
+* 自动生成 commit message
+* 调试 agent 行为
+
+---
+
+## 四、核心原则（v3.1）
 
 ### 1. Git 协同原则
 
 * Git 是唯一真实状态
 * Agent 不得假设仓库状态
-* 必须在关键节点校验
+* 仅在关键节点校验
 
 ---
 
 ### 2. 最小提交原则
 
-只允许提交：
+仅提交：
 
 * FILE_SET 中的文件
 * summary 文件
 
 ---
 
-### 3. 用户改动保护原则（优化）
+### 3. 用户改动保护原则（严格）
 
-阶段开始时存在未提交改动：
+阶段开始存在未提交改动：
 
-默认行为：
+默认：
 
 ```text
-不自动纳入
-不自动提交
-保留在工作区
+不纳入
+不提交
+不修改
 ```
 
-例外：
+仅允许纳入条件：
 
-* 若 agent 能明确判断“高度相关” → 可纳入
+```text
+1. 本阶段直接修改该文件
+2. 用户显式要求
+```
 
-仅在冲突时才请求用户输入
+👉 不允许基于“语义判断相关性”
 
 ---
 
-### 4. diff 隔离原则
+### 4. FILE_SET 控制原则
 
-diff 必须：
+禁止：
 
-* 基于 BASE_COMMIT
-* 仅针对 FILE_SET 文件
+* 隐式新增文件
+* 未记录修改
+
+允许：
+
+* 显式扩展（必须记录 ACTION_LOG）
+
+---
+
+### 5. diff 隔离原则
 
 ```bash
 git diff BASE_COMMIT -- <file>
 ```
 
+仅允许 FILE_SET 文件参与
+
 ---
 
-### 5. 阶段隔离原则
+### 6. 阶段隔离原则
 
 * 一个阶段 = 一个 commit
 * 不允许跨阶段提交
 
 ---
 
-### 6. 校验策略（优化）
+### 7. 校验策略（优化）
 
-仅在以下时机执行 git 校验：
+仅在以下时机执行：
 
 ```text
 1. PRE_STAGE_CHECK
@@ -146,27 +181,9 @@ git diff BASE_COMMIT -- <file>
 3. ERROR
 ```
 
-👉 不要求每次文件操作后执行
-
 ---
 
-### 7. 一致性定义（放宽）
-
-允许差异：
-
-* gitignore 文件
-* 编译产物
-* 缓存文件
-
-要求：
-
-👉 源码文件一致
-
----
-
-## 五、阶段状态机（v3）
-
-### 状态定义
+## 五、阶段状态机
 
 ```text
 IDLE
@@ -184,48 +201,19 @@ RECOVERY
 
 ---
 
-### 状态流转
-
-```text
-IDLE
-  ↓
-PRE_STAGE_CHECK
-  ↓
-STAGE_INIT
-  ↓
-STAGE_ACTIVE
-  ↓
-STAGE_VALIDATE
-  ↓
-STAGE_SUMMARY
-  ↓
-STAGE_COMMIT
-  ↓
-COMPLETED
-
-异常路径：
-ANY → ERROR → RECOVERY
-```
+## 六、执行流程（关键）
 
 ---
 
-## 六、执行流程
-
 ### 1. PRE_STAGE_CHECK
-
-执行：
 
 ```bash
 git status
 ```
 
-处理未提交改动：
+处理：
 
-| 情况   | 行为          |
-| ---- | ----------- |
-| 明确相关 | 纳入 FILE_SET |
-| 明确无关 | 忽略          |
-| 不确定  | 忽略          |
+* 不自动纳入任何已有改动
 
 ---
 
@@ -240,26 +228,31 @@ BASE_COMMIT=$(git rev-parse HEAD)
 ```text
 STAGE_ID
 FILE_SET = 空
+ACTION_LOG = []
 ```
 
 ---
 
 ### 3. STAGE_ACTIVE
 
-Agent 执行任务，并维护：
-
-```text
-NEW / MODIFIED / DELETED
-```
-
 规则：
 
-* 每次文件操作必须更新 FILE_SET
-* 不允许隐式新增文件
+* 每次文件操作必须：
+
+```text
+1. 更新 FILE_SET
+2. 写入 ACTION_LOG
+```
+
+示例：
+
+```text
+ADD_TO_FILE_SET("a.py", "modify parser logic")
+```
 
 ---
 
-### 4. STAGE_VALIDATE（关键）
+### 4. STAGE_VALIDATE（强化版）
 
 执行：
 
@@ -268,20 +261,24 @@ git status
 git diff
 ```
 
-校验：
+必须满足：
 
 ```text
-FILE_SET vs Git 实际变更
+1. FILE_SET ⊆ git changes
+2. git changes ⊆ FILE_SET（源码文件）
+3. 无未记录源码改动
+4. 无未跟踪源码文件（除非忽略）
 ```
 
-要求：
+否则：
 
-* 源码文件一致
-* 否则进入 ERROR
+```text
+→ ERROR
+```
 
 ---
 
-### 5. STAGE_SUMMARY（优化版）
+### 5. STAGE_SUMMARY
 
 生成：
 
@@ -293,13 +290,13 @@ step_<stage_id>_<description>.md
 
 ```text
 1. 阶段描述
-2. BASE_COMMIT
-3. 变更文件列表
-4. 关键差异摘要（非完整 diff）
-5. 风险/注意事项
+2. STAGE_TYPE
+3. BASE_COMMIT
+4. FILE_SET
+5. ACTION_LOG（简要）
+6. 关键差异摘要
+7. 风险说明
 ```
-
-👉 不再强制完整代码（避免冗余）
 
 ---
 
@@ -308,7 +305,7 @@ step_<stage_id>_<description>.md
 ```bash
 git add <FILE_SET>
 git add summary.md
-git commit -m "[STAGE_ID] step: <description>"
+git commit -m "[STAGE_ID][TYPE] <description>"
 ```
 
 禁止：
@@ -324,8 +321,8 @@ git commit -a
 
 触发：
 
-* file_set 不一致
-* git 操作失败
+* FILE_SET 不一致
+* git 状态异常
 
 ---
 
@@ -334,7 +331,7 @@ git commit -a
 策略：
 
 ```text
-1. 同步 FILE_SET
+1. 同步 FILE_SET（优先）
 2. 或回滚 BASE_COMMIT
 3. 或请求用户介入
 ```
@@ -357,12 +354,24 @@ git commit -a
 
 ```text
 1. commit 是阶段边界
-2. FILE_SET 由 agent 显式维护
-3. Git 负责校验与提交
-4. 不得提交未确认用户改动
-5. 不得使用 git add .
-6. diff 必须基于 BASE_COMMIT
-7. 每阶段必须独立 commit
+2. FILE_SET 必须显式维护
+3. ACTION_LOG 必须记录
+4. Git 是唯一真实状态
+5. 不得提交用户未确认改动
+6. 不得使用 git add .
+7. validate 必须严格通过
 ```
 
 ---
+
+## 九、设计总结
+
+本协议实现：
+
+👉 Agent 可控执行
+👉 Git 强一致校验
+👉 可恢复工程流程
+
+本质定位：
+
+👉 **Agent Runtime Control Layer（代理运行控制层）**
