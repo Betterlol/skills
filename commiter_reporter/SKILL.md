@@ -1,3 +1,8 @@
+---
+name: git-stage-manager
+description: Orchestrate stage-based Git commits for engineering projects with strict isolation, explicit file ownership, and safe commit behavior. Use when completing a bounded engineering stage that requires a single controlled commit, structured summary generation, and protection against unintended changes.
+---
+
 # Git Stage Manager Skill
 
 ## Purpose
