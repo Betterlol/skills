@@ -170,7 +170,7 @@ step_<stage_id>_<description>.md
 
 Content:
 
-````text
+```text
 # Stage Summary
 
 ## 1. Stage Description
@@ -183,30 +183,25 @@ Content:
 ## 3. New Files
 
 ## 4. New File Full Contents
-Use real file content:
-```bash
-cat <file>
-```
+Use real file content via tool/command/script
 
 ## 5. Modified Files
 
 ## 6. Modified File Diffs
-```bash
-git diff BASE_COMMIT -- <file>
-```
+Use git diff against BASE_COMMIT
 
 ## 7. Deleted Files Optional
 
 ## 8. ACTION_LOG
 
 ## 9. Risks / Notes
-````
+```
 
 Rules:
 
 ```text
 - Must include full content for new files
-- Must use git diff for modifications
+- Must include BASE_COMMIT diffs for modified files
 - Do not reconstruct content manually
 - Do not include full-repo diff
 ```
@@ -229,16 +224,24 @@ SUMMARY_FILE is not a stage-owned file.
 
 For New File Full Contents and Modified File Diffs:
 
-- MUST be appended using shell commands:
-    cat <file> >> <summary>
-    git diff BASE_COMMIT -- <file> >> <summary>
+```text
+MUST:
+- Be generated via tool, command, or script output
+- Reflect real filesystem or Git state
 
-- MUST NOT:
-    - manually write code
-    - reconstruct content
-    - paraphrase or summarize
+Acceptable methods:
+- shell commands (cat, git diff, etc.)
+- redirection (>>)
+- custom scripts
+- trusted file read tools
 
-- The output must reflect actual file system state at commit time
+MUST NOT:
+- manually write code content
+- reconstruct content from memory
+- paraphrase or summarize file contents
+
+The output must reflect actual state at generation time.
+```
 
 ---
 
@@ -246,7 +249,7 @@ For New File Full Contents and Modified File Diffs:
 
 ```text
 1. All new files listed
-2. All new files include full content
+2. All new files include full content (via evidence rule)
 3. All modified files listed
 4. All modified files include BASE_COMMIT diffs
 5. Deleted files handled if exist
@@ -265,10 +268,25 @@ If failed:
 
 ### 7. STAGE_COMMIT
 
+Before commit, perform lightweight final check:
+
+```bash
+git status
+```
+
+Then:
+
 ```bash
 git add <FILE_SET files>
 git add <SUMMARY_FILE>
 git commit -m "[<STAGE_ID>][<STAGE_TYPE>] <description>"
+```
+
+Notes:
+
+```text
+- Do not re-run full diff validation here (already done in STAGE_VALIDATE)
+- Keep final check minimal to reduce overhead
 ```
 
 ---
@@ -305,11 +323,13 @@ Enter ERROR if:
 ## Recovery
 
 ```text
-1. Fix FILE_SET
+1. Fix FILE_SET explicitly
 2. Re-run validation
 3. Ask user if needed
-4. Abort commit safely
+4. Abort commit safely if unresolved
 ```
+
+Do not use destructive commands.
 
 ---
 
@@ -339,6 +359,12 @@ git clean -fd
 git stash
 ```
 
+Reason:
+
+```text
+These commands may introduce unrelated changes, destroy state, or break traceability.
+```
+
 ---
 
 ## Anti-Patterns
@@ -348,7 +374,7 @@ git stash
 - Including files from git status automatically
 - Committing unrelated changes
 - Skipping summary
-- Writing fake file content
+- Writing fake or reconstructed file content
 - Using full-repo diff
 - Recursive summary inclusion
 ```
@@ -367,3 +393,6 @@ Never commit unrelated user changes
 Never use git add .
 Never push unless explicitly requested
 Validate before commit
+```
+
+```
