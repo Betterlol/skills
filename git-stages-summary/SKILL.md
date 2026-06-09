@@ -1,15 +1,20 @@
 ---
 name: git-stages-summary
-description: Aggregate multiple stage summaries into a single hierarchical release summary for efficient context transfer to web LLMs. Use when multiple stages have been completed and a consolidated view of the entire work interval is needed.
+description: Consolidate multiple stages into a lightweight release summary for web LLMs. Per-stage sections show only description + file list + ACTION_LOG; the complete git diff from start to end serves as the single authoritative evidence. Use when multiple stages have been completed and a token-efficient holistic view is needed.
 ---
 
 # Git Stages Summary Skill
 
 ## Overview
 
-This skill aggregates **multiple bounded engineering stages** into a single, hierarchical release summary.
+This skill aggregates **multiple bounded engineering stages** into a single, lightweight release summary optimized for web LLM consumption.
 
-After several stages have been completed, loading each individual `step_*.md` into a web LLM becomes expensive in tokens and cumbersome to manage. This skill solves that by producing a **consolidated summary** over a commit range — combining aggregated `git diff` output with synthesized intent from individual stage `ACTION_LOG`s.
+After several stages have been completed, loading each individual `step_*.md` into a web LLM becomes expensive in tokens and cumbersome to manage. This skill solves that by producing a **two-layer document**:
+
+- **Layer 1 (lightweight per-stage)**: each stage summarized in ~3–5 lines — description, file list, ACTION_LOG only
+- **Layer 2 (single authoritative evidence)**: the complete `git diff <START>..<END>` — one unified diff covering the entire release range
+
+The web LLM reads Layer 1 to understand the development journey, then reads Layer 2 once to grasp the full code delta. No need to open N separate `step_*.md` files.
 
 It operates at a higher level than `git-stage-manager`: one release summary spans N stages.
 
@@ -212,58 +217,46 @@ Content structure:
 - RELEASE_END_COMMIT:
 - STAGES_COVERED:
 - TIMESTAMP:
+- STATS (filtered): files changed, insertions, deletions
 
 ## 2. High-Level Intent
 
 Aggregate of ACTION_LOG intents across all stages.
 Provide a paragraph summary of what this release accomplishes as a whole.
 
-## 3. File Change Catalog
-### New Files
-  file | stage | size
-### Modified Files
-  file | stages_touched | diff_stat
-### Deleted Files
-  file | stage
-
-## 4. Stage-by-Stage Breakdown
+## 3. Stage-by-Stage Overview (LIGHTWEIGHT)
 
 For each stage in RANGE_STAGES:
+
   ### Stage <STAGE_ID> [<STAGE_TYPE>]
-  - Description
-  - Files touched
-  - Key changes (with evidence from aggregated diff)
+  - **Description**: one-liner of what this stage achieved
+  - **Files**: new / modified / deleted (file names only, no diffs)
+  - **ACTION_LOG**:
+    ```
+    file | action | reason
+    ```
 
-## 5. Full Code Evidence
+No per-stage code content or diffs here. Keep each stage to ~3-5 lines.
+The goal is to give the web LLM a quick map of the development journey.
 
-### New File Contents
-Use `cat` to read each new file.
-
-### Modified File Diffs
-Use `git diff $RELEASE_START_COMMIT..$RELEASE_END_COMMIT -- <file>` for each modified file.
-
-### Deleted Files (if any)
-
-## 6. ACTION_LOG (Aggregated)
+## 4. Complete Diff (EVIDENCE)
 
 ```
-<stage_01>:
-  file: a.py | action: modify | reason: fix parser bug
-  ...
-<stage_02>:
-  ...
+git diff $RELEASE_START_COMMIT..$RELEASE_END_COMMIT
+```
 
-## 7. Risks / Notes
+Full unified diff from release start to end. This is the single authoritative code change — the web LLM reads this once to understand the entire codebase delta.
+
+## 5. Risks / Notes
 ```
 
 Rules:
 
 ```text
-- Must include full content for new files (via cat)
-- Must include per-file diffs for modified files (via git diff)
-- Must include stat summary (filtered — only show files passing FILTER_CONFIG)
-- Do not include full-range giant diff — use per-file diffs
-- FILTER_CONFIG applies to all sections of the release output
+- Section 3 (per-stage) must be lightweight: file names + ACTION_LOG only
+- Section 4 (diff) must be the COMPLETE unified git diff — not per-file, not summarized
+- Section 4 is the single authoritative evidence section
+- FILTER_CONFIG filters files from Section 3 file lists and Section 4 diff output
 - All evidence must be generated via tool/command, not reconstructed from memory
 ```
 
@@ -299,9 +292,9 @@ MUST NOT:
 2. AGGREGATED_DIFF matches the sum of all stage summaries
 3. Every file in aggregated diff is accounted for in at least one stage
 4. RELEASE_SUMMARY_FILE not part of any stage
-5. No full-repo diff included (use per-file)
-6. All new files have full content (via evidence rule)
-7. All modified files have per-file diffs
+5. Section 3 (per-stage) contains only lightweight info — no code content or per-file diffs
+6. Section 4 (complete diff) is a single unified git diff from start to end
+7. Section 4 diff output is verified against git (matches actual diff)
 8. FILTER_CONFIG was applied consistently across all sections
 9. No files matching exclude_patterns appear in the output
 10. If include_only set, all output files match at least one include pattern
@@ -395,12 +388,12 @@ This skill is read-only with respect to repository state. It produces a summary 
 ```text
 - Skipping stage summary collection
 - Reconstructing ACTION_LOG from memory instead of reading stage summaries
-- Including full-range diff as a single blob
+- Including per-file diffs in the per-stage sections (Section 3 must be lightweight)
+- Splitting the complete diff into per-file diffs (Section 4 must be unified)
 - Writing subjective conclusions not supported by evidence
 - Treating release summary as a replacement for individual stage commits
 - Applying FILTER_CONFIG inconsistently across sections
 - Silently dropping files without noting the filter reason
-- Using FILTER_CONFIG on git diff command itself (filter only applies to output)
 ```
 
 ---
@@ -409,14 +402,15 @@ This skill is read-only with respect to repository state. It produces a summary 
 
 ```text
 release = stage range boundary
-AGGREGATED_DIFF = evidence
-LOG_AGGREGATION = intent across stages
+per-stage = lightweight map (names + actions only)
+AGGREGATED_DIFF = single authoritative evidence
 Git = truth
 FILTER_CONFIG = user focus scope
 
 Collect all stage summaries before synthesis
+Never bloat per-stage sections with code or diffs
+Section 4 must be COMPLETE unified git diff
 Never reconstruct evidence from memory
-Never include full-range diff — use per-file diffs
 Apply filters consistently across all sections
 Validate before completion
 ```
